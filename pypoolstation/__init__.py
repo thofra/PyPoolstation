@@ -152,6 +152,7 @@ class Pool:
         self.total_uv_timer = None
         self.uv_ballast_problem = None
         self.uv_fuse_problem = None
+        self.raw_vars = {}
 
     async def post(self, url, data=""):
         try:
@@ -180,6 +181,7 @@ class Pool:
         self.logger.debug(f"Updating pool info for pool with id {self.id}")
         info = await self.post(POOL_INFO_URL + str(self.id))
         self.alias = info["alias"]
+        self.raw_vars = info["vars"]
         try:
             # I don't know why these values would be missing since all devices have these sensors
             # but people have reported that sometimes they are, so let's wrap them in try/except.

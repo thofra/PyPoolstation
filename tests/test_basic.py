@@ -8,7 +8,7 @@ import aiohttp
 # Ensure pypoolstation is in path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from pypoolstation import Pool, Account
+from pypoolstation import Pool, Account, API_SIGNS
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -51,12 +51,31 @@ async def main():
             print("Pool Info Synced.")
             print("-" * 20)
             print("Pool Attributes:")
+
+            # Mapping for attributes that don't match API_SIGNS keys exactly
+            ATTR_TO_SIGN_KEY = {
+                'uv_ballast_problem': 'uv_ballast',
+                'uv_fuse_problem': 'uv_fuse',
+                'uv_on': 'uv_ballast',
+                'uv_enabled': 'uv_ballast',
+                'waterflow_problem': 'waterflow',
+            }
+
             for key, value in vars(pool).items():
                 if key == 'relays':
                     continue # Print relays separately
-                if key.startswith('_') or key == 'logger':
+                if key.startswith('_') or key == 'logger' or key == 'raw_vars':
                     continue # Skip private/internal attributes
-                print(f"{key}: {value}")
+                
+                sign_key = ATTR_TO_SIGN_KEY.get(key, key)
+                
+                if sign_key in API_SIGNS:
+                    sign = API_SIGNS[sign_key]
+                    # Attempt to get raw value from stored raw_vars if available
+                    raw_val = pool.raw_vars.get(sign, 'N/A')
+                    print(f"{sign_key} ({sign}): {raw_val} -> {key}: {value}")
+                else:
+                    print(f"{key}: {value}")
             
             print("-" * 20)
             print(f"Relays ({len(pool.relays)}):")
