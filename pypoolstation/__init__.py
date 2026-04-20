@@ -53,15 +53,21 @@ class Account:
         if self._token: return self._token
         return await self.login()
 
-    async def login(self):
+    async def login(self, login_code=""):
         self.logger.debug("Account attempting to log in")
         current_date = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         async with self._session.post(LOGIN_URL, json={
             "username": self._username, 
             "password": self._password, 
             "remember": True, 
-            "connectdate": current_date
+            "connectdate": current_date,
+            "login_code": login_code
         }) as resp:
+            if resp.status == 410:
+                data = await resp.json()
+                if data.get("error_code") == "REQUEST_LOGIN_CODE":
+                    raise TwoFactorAuthRequiredException('2FA login code required')
+                raise AuthenticationException('Authentication failed: 410 Gone')
             if resp.status == 401:
                 raise AuthenticationException('Authentication failed')
             resp.raise_for_status()
@@ -298,6 +304,9 @@ class Relay:
             return previous_value   
 
 class AuthenticationException(Exception):
+    pass
+
+class TwoFactorAuthRequiredException(Exception):
     pass
 
 def get_auth_headers(token: str) -> tuple[str, str]:
