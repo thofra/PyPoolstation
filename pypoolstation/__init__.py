@@ -53,15 +53,21 @@ class Account:
         if self._token: return self._token
         return await self.login()
 
-    async def login(self):
+    async def login(self, login_code=""):
         self.logger.debug("Account attempting to log in")
         current_date = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         async with self._session.post(LOGIN_URL, json={
             "username": self._username, 
             "password": self._password, 
             "remember": True, 
-            "connectdate": current_date
+            "connectdate": current_date,
+            "login_code": login_code
         }) as resp:
+            if resp.status == 410:
+                data = await resp.json()
+                if data.get("error_code") == "REQUEST_LOGIN_CODE":
+                    raise TwoFactorAuthRequiredException('2FA login code required')
+                raise AuthenticationException('Authentication failed: 410 Gone')
             if resp.status == 401:
                 raise AuthenticationException('Authentication failed')
             resp.raise_for_status()
@@ -152,6 +158,7 @@ class Pool:
         self.total_uv_timer = None
         self.uv_ballast_problem = None
         self.uv_fuse_problem = None
+        self.raw_vars = {}
 
     async def post(self, url, data=""):
         try:
@@ -180,6 +187,7 @@ class Pool:
         self.logger.debug(f"Updating pool info for pool with id {self.id}")
         info = await self.post(POOL_INFO_URL + str(self.id))
         self.alias = info["alias"]
+        self.raw_vars = info["vars"]
         try:
             # I don't know why these values would be missing since all devices have these sensors
             # but people have reported that sometimes they are, so let's wrap them in try/except.
@@ -296,6 +304,9 @@ class Relay:
             return previous_value   
 
 class AuthenticationException(Exception):
+    pass
+
+class TwoFactorAuthRequiredException(Exception):
     pass
 
 def get_auth_headers(token: str) -> tuple[str, str]:
