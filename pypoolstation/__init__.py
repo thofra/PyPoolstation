@@ -248,17 +248,23 @@ class Pool:
 
         self.percentage_electrolysis = int(info["vars"][API_SIGNS["percentage_electrolysis"]])
         self.target_percentage_electrolysis = int(info["vars"][API_SIGNS["target_percentage_electrolysis"]])
+
+        # FIX: preserve raw_state so HA integration can distinguish OFF / ON / AUTO
         if len(self.relays) == 0:
             self.relays = [
-                Relay(id=r["id"], pool=self, name=r["nombre"], sign=r["sign"], active=info["vars"][r["sign"]] == '1')
+                Relay(
+                    id=r["id"], pool=self, name=r["nombre"], sign=r["sign"],
+                    raw_state=info["vars"][r["sign"]]
+                )
                 for r in info["relays"]
             ]
-
         else:
             for obj in info["relays"]:
                 relay = next((r for r in self.relays if r.id == obj["id"]), None)
                 relay.name = obj["nombre"]
-                relay.active = info["vars"][obj["sign"]] == '1'
+                # FIX: update raw_state (and derive active from it)
+                relay.raw_state = info["vars"][obj["sign"]]
+                relay.active = relay.raw_state != "0"
 
     async def set_target_attribute(self, attr, value): 
         previous_value = getattr(self, attr)
@@ -286,22 +292,33 @@ class Pool:
         return await self.set_target_attribute("target_percentage_electrolysis", value)
 
 class Relay:
-    def __init__(self, id=None, pool=None, name="", sign="", active=False):
+    def __init__(self, id=None, pool=None, name="", sign="", active=False, raw_state="0"):
         self.id = id
         self.pool = pool
         self.sign = sign
         self.name = name
-        self.active = active
+        # FIX: raw_state stores the actual API value: "0"=off, "1"=on, anything else=auto
+        self.raw_state = raw_state
+        # FIX: active is True for ON and AUTO (everything that is not "0")
+        self.active = raw_state != "0"
 
     async def set_active(self, active):
-        previous_value = self.active
-        self.active = active
+        """Legacy method: turns relay fully ON ('1') or OFF ('0'). Use set_mode() for AUTO."""
+        return await self.set_mode("1" if active else "0")
+
+    async def set_mode(self, mode):
+        """Set relay to a specific mode: '0'=off, '1'=on, anything else=auto (sent as-is).
+        Returns the mode string on success, or the previous raw_state on error."""
+        previous_raw = self.raw_state
+        self.raw_state = mode
+        self.active = mode != "0"
         try:
-            await self.pool.post(UPDATE_URL, data=f"&data={json.dumps({'id': self.pool.id, 'sign': self.sign, 'value': '1' if active else '0'})}")
-            return active
-        except ClientError as err:
-            self.active = previous_value 
-            return previous_value   
+            await self.pool.post(UPDATE_URL, data=f"&data={json.dumps({'id': self.pool.id, 'sign': self.sign, 'value': mode})}")
+            return mode
+        except ClientError:
+            self.raw_state = previous_raw
+            self.active = previous_raw != "0"
+            return previous_raw
 
 class AuthenticationException(Exception):
     pass
